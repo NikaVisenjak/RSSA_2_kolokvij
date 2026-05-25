@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package secure_service;
+
+message SecureRequest {
+  string message = 1;
+}
+
+message SecureResponse {
+  string reply         = 1;
+  string client_id     = 2;
+  bool   authenticated = 3;
+}
+
+service SecureService {
+  rpc SendMessage (SecureRequest) returns (SecureResponse);
+}

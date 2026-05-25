@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package guessing_game;
+
+// Zahteva za avtomatsko igro (server žreba in preveri)
+message GameRequest {
+  int32 a = 1;  // spodnja meja
+  int32 b = 2;  // zgornja meja
+}
+
+// Zahteva z ugibanjem igralca
+message GuessRequest {
+  int32 a     = 1;
+  int32 b     = 2;
+  int32 guess = 3;
+}
+
+// Rezultat ene igre
+message GameResult {
+  bool  correct       = 1;
+  int32 secret_number = 2;
+  int32 player_score  = 3;
+  int32 server_score  = 4;
+  int32 total_games   = 5;
+}
+
+service GuessingGame {
+  rpc PlayGame    (GameRequest)  returns (GameResult);
+  rpc SubmitGuess (GuessRequest) returns (GameResult);
+}

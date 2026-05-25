@@ -135,6 +135,9 @@ cd naloga6_grpc_secure
 pip install grpcio grpcio-tools
 
 # 1. Generiraj certifikate
+# Windows (PowerShell):
+powershell -ExecutionPolicy Bypass -File generate_certs.ps1
+# Linux/macOS/Git Bash:
 bash generate_certs.sh
 
 # 2. Generiraj gRPC kodo

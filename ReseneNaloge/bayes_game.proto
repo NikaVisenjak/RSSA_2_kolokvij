@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package bayes_game;
+
+// Smer do skrivne žoge glede na trenutno ugibanje
+enum Direction {
+  UNKNOWN     = 0;
+  NORTH       = 1;  // žoga je severno (višji y)
+  SOUTH       = 2;
+  EAST        = 3;
+  WEST        = 4;
+  NORTHEAST   = 5;
+  SOUTHEAST   = 6;
+  SOUTHWEST   = 7;
+  NORTHWEST   = 8;
+}
+
+message StartGameRequest {}
+
+message StartGameResponse {
+  string game_id = 1;
+}
+
+message GuessRequest {
+  string game_id = 1;
+  double x       = 2;
+  double y       = 3;
+}
+
+message GuessResponse {
+  bool      game_over = 1;
+  int32     attempts  = 2;
+  Direction direction = 3;
+}
+
+service BayesGame {
+  rpc StartGame (StartGameRequest) returns (StartGameResponse);
+  rpc MakeGuess (GuessRequest)     returns (GuessResponse);
+}
