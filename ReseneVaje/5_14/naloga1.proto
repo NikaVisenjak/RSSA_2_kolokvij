@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package naloga1;
+
+// Definicija sporočila
+message Sporocilo {
+  string text = 1;
+}
+
+// Definicija servisa
+service Naloga1 {
+  rpc PosljiSporocilo (Sporocilo) returns (Sporocilo);
+}
+
+// zazenemo python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. naloga1.proto
+//To ti ustvari:
+//naloga1_pb2.py
+//naloga1_pb2_grpc.py
+// + pip install grpcio grpcio-tools

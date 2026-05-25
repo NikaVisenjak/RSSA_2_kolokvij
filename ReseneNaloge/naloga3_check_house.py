@@ -1,235 +1,200 @@
-# ============================================================
-# NALOGA 3: Preverjanje in popravljanje DER objektov
-# ============================================================
-# House ASN.1 definicija:
-#   House ::= SEQUENCE {
-#     rooms   INTEGER (1..4),
-#     windows INTEGER (5..8),
-#     doors   INTEGER (7..11),
-#     sockets INTEGER (9..13)
-#   }
-#
-# DER (Distinguished Encoding Rules) format bajt po bajt:
-#
-# SEQUENCE tag: 0x30
-# INTEGER  tag: 0x02
-#
-# Format vsakega polja:
-#   [TAG byte] [LENGTH byte] [VALUE byte(s)]
-#
-# Primer: INTEGER vrednost 3:
-#   0x02  0x01  0x03
-#   ^TAG  ^LEN  ^VAL
-#
-# Celotna SEQUENCE:
-#   0x30 [skupna dolžina vsebine]
-#   0x02 0x01 [rooms]
-#   0x02 0x01 [windows]
-#   0x02 0x01 [doors]
-#   0x02 0x01 [sockets]
-# ============================================================
+"""
+ASN.1 DER dekoder, validator in popravljalnik za objekt House.
 
-from pyasn1.type import univ, namedtype, constraint
-from pyasn1.codec.der.encoder import encode as der_encode
-from pyasn1.codec.der.decoder import decode as der_decode
-from pyasn1.error import SubstrateUnderrunError, PyAsn1Error
+House ::= SEQUENCE {
+    rooms   INTEGER (1..4),
+    windows INTEGER (5..8),
+    doors   INTEGER (7..11),
+    sockets INTEGER (9..13)
+}
+"""
 
-# -------------------------------------------------------
-# Definicija House ASN.1 objekta
-# -------------------------------------------------------
-class House(univ.Sequence):
-    componentType = namedtype.NamedTypes(
-        namedtype.NamedType(
-            'rooms',
-            univ.Integer().subtype(
-                # ValueRangeConstraint(min, max) - definira veljavni razpon
-                subtypeSpec=constraint.ValueRangeConstraint(1, 4)
-            )
-        ),
-        namedtype.NamedType(
-            'windows',
-            univ.Integer().subtype(
-                subtypeSpec=constraint.ValueRangeConstraint(5, 8)
-            )
-        ),
-        namedtype.NamedType(
-            'doors',
-            univ.Integer().subtype(
-                subtypeSpec=constraint.ValueRangeConstraint(7, 11)
-            )
-        ),
-        namedtype.NamedType(
-            'sockets',
-            univ.Integer().subtype(
-                subtypeSpec=constraint.ValueRangeConstraint(9, 13)
-            )
-        ),
-    )
+# --- Omejitve polj ---
+FIELDS = [
+    ("rooms",   1,  4),
+    ("windows", 5,  8),
+    ("doors",   7, 11),
+    ("sockets", 9, 13),
+]
 
-# -------------------------------------------------------
-# Funkcija za preverjanje DER bajt-po-bajt (ročno)
-# -------------------------------------------------------
-def analyze_der_bytes(data: bytes, label: str = ""):
-    """
-    Ročna analiza DER struktury bajt po bajt.
-    Pomaga ugotoviti kje so napake v kodiranju.
-    """
-    print(f"\n=== Analiza {label} ===")
-    print(f"Hex: {data.hex()}")
-    print(f"Bajti: {list(data)}")
-    
-    i = 0  # indeks trenutnega bajta
-    
-    # 1. bajt mora biti SEQUENCE tag (0x30 = 48)
-    if i < len(data):
-        tag = data[i]
-        print(f"\n[{i}] TAG: 0x{tag:02x}", end=" ")
-        if tag == 0x30:
-            print("✓ (SEQUENCE)")
-        else:
-            print(f"✗ (Pričakovan 0x30 za SEQUENCE, dobili {hex(tag)})")
-        i += 1
-    
-    # 2. bajt je dolžina vsebine SEQUENCE
-    if i < len(data):
-        seq_len = data[i]
-        print(f"[{i}] SEQUENCE dolžina: {seq_len}")
-        i += 1
-    
-    # Preberi vsako INTEGER polje
-    field_names = ['rooms (1-4)', 'windows (5-8)', 'doors (7-11)', 'sockets (9-13)']
-    field_ranges = [(1,4), (5,8), (7,11), (9,13)]
-    
-    for idx, (fname, (fmin, fmax)) in enumerate(zip(field_names, field_ranges)):
-        if i >= len(data):
-            print(f"  NAPAKA: Manjka polje {fname}")
-            break
-            
-        # INTEGER tag
-        tag = data[i]
-        print(f"\n[{i}] TAG: 0x{tag:02x}", end=" ")
-        if tag == 0x02:
-            print("✓ (INTEGER)")
-        else:
-            print(f"✗ (Pričakovan 0x02 za INTEGER)")
-        i += 1
-        
-        # Dolžina
-        if i < len(data):
-            length = data[i]
-            print(f"[{i}] Dolžina: {length}")
-            i += 1
-        
-        # Vrednost
-        if i < len(data) and length:
-            value = int.from_bytes(data[i:i+length], byteorder='big', signed=True)
-            valid = fmin <= value <= fmax
-            print(f"[{i}] Vrednost: {value} {'✓' if valid else f'✗ (mora biti {fmin}..{fmax})'}")
-            i += length
+# Privzete veljavne vrednosti za popravek (sredina obsega)
+DEFAULT_FIX = {
+    "rooms":   2,
+    "windows": 6,
+    "doors":   9,
+    "sockets": 11,
+}
 
-# -------------------------------------------------------
-# Funkcija za popravljanje in validacijo House objekta
-# -------------------------------------------------------
-def verify_and_fix_house(filename: str):
-    """
-    Prebere DER datoteko, poskusi dekodirati in preveri vrednosti.
-    Če so vrednosti zunaj obsega, jih popravi na veljavne.
-    """
-    print(f"\n{'='*50}")
-    print(f"Preverjam: {filename}")
-    
-    # Preberemo raw bajte iz datoteke
+# ─── DER pomožne funkcije ────────────────────────────────────────────────────
+
+def parse_der(data: bytes) -> dict:
+    """Razčleni DER zaporedje in vrne slovar {ime_polja: vrednost}."""
+    if len(data) < 2:
+        raise ValueError("Podatki so prekratki za DER.")
+
+    # SEQUENCE tag mora biti 0x30
+    if data[0] != 0x30:
+        raise ValueError(f"Pričakovan tag SEQUENCE (0x30), dobljen: 0x{data[0]:02x}")
+
+    seq_len = data[1]
+    payload = data[2:]
+
+    if len(payload) != seq_len:
+        raise ValueError(
+            f"Dolžina SEQUENCE ({seq_len}) se ne ujema z dejansko dolžino ({len(payload)})."
+        )
+
+    result = {}
+    offset = 0
+    field_index = 0
+
+    while offset < len(payload):
+        if field_index >= len(FIELDS):
+            raise ValueError("Preveč polj v zaporedju.")
+
+        tag = payload[offset]
+        if tag != 0x02:
+            raise ValueError(
+                f"Pričakovan tag INTEGER (0x02) pri odmiku {offset}, dobljen: 0x{tag:02x}"
+            )
+
+        length = payload[offset + 1]
+        value_bytes = payload[offset + 2 : offset + 2 + length]
+
+        if len(value_bytes) != length:
+            raise ValueError("Nepopolni podatki za INTEGER.")
+
+        value = int.from_bytes(value_bytes, byteorder="big", signed=True)
+        field_name = FIELDS[field_index][0]
+        result[field_name] = value
+
+        offset += 2 + length
+        field_index += 1
+
+    if field_index != len(FIELDS):
+        raise ValueError(f"Pričakoval {len(FIELDS)} polj, našel {field_index}.")
+
+    return result
+
+
+def encode_integer(value: int) -> bytes:
+    """Zakodira celo število kot DER INTEGER TLV."""
+    # Minimalno število bajtov za vrednost (signed)
+    length = max(1, (value.bit_length() + 8) // 8)
+    val_bytes = value.to_bytes(length, byteorder="big", signed=True)
+    return bytes([0x02, len(val_bytes)]) + val_bytes
+
+
+def encode_sequence(fields: dict) -> bytes:
+    """Zakodira House kot DER SEQUENCE."""
+    payload = b"".join(encode_integer(fields[name]) for name, _, _ in FIELDS)
+    return bytes([0x30, len(payload)]) + payload
+
+
+# ─── Validacija ──────────────────────────────────────────────────────────────
+
+def validate(fields: dict) -> list[str]:
+    """Preveri omejitve; vrne seznam napak (prazen = OK)."""
+    errors = []
+    for name, lo, hi in FIELDS:
+        val = fields.get(name)
+        if val is None:
+            errors.append(f"  ✗ '{name}': manjka")
+        elif not (lo <= val <= hi):
+            errors.append(f"  ✗ '{name}' = {val}  (dovoljeno: {lo}..{hi})")
+    return errors
+
+
+def fix(fields: dict) -> dict:
+    """Popravi vrednosti, ki so izven obsega, z vnaprej določenimi veljavnimi vrednostmi."""
+    fixed = dict(fields)
+    for name, lo, hi in FIELDS:
+        val = fixed.get(name)
+        if val is None or not (lo <= val <= hi):
+            fixed[name] = DEFAULT_FIX[name]
+    return fixed
+
+
+# ─── Tiskanje ────────────────────────────────────────────────────────────────
+
+def print_fields(fields: dict, label: str = ""):
+    if label:
+        print(f"  [{label}]")
+    for name, lo, hi in FIELDS:
+        val = fields.get(name, "?")
+        ok = "✓" if isinstance(val, int) and lo <= val <= hi else "✗"
+        print(f"    {ok} {name:8s} = {val}  (obseg: {lo}..{hi})")
+
+
+def process_file(path: str):
+    print(f"\n{'='*55}")
+    print(f" Datoteka: {path}")
+    print(f"{'='*55}")
+
+    # Preberi hex vsebino
+    with open(path, "r") as f:
+        hex_str = f.read().strip()
+
+    print(f"  HEX vhod : {hex_str}")
+    data = bytes.fromhex(hex_str)
+    print(f"  Bajti    : {' '.join(f'{b:02x}' for b in data)}")
+
+    # Razčleni
     try:
-        with open(filename, 'rb') as f:  # 'rb' = read binary
-            raw_bytes = f.read()
-    except FileNotFoundError:
-        print(f"Datoteka {filename} ne obstaja - ustvarjam testni primer")
-        # Ustvarimo testni DER z namernimi napakami za demonstracijo
-        raw_bytes = create_test_der_with_errors()
-    
-    # Analiziramo bajte ročno
-    analyze_der_bytes(raw_bytes, filename)
-    
-    # Poskusimo dekodirati z pyasn1
-    print(f"\n--- Dekodiranje z pyasn1 ---")
-    try:
-        # der_decode vrne (objekt, preostali_bajti)
-        house, remainder = der_decode(raw_bytes, asn1Spec=House())
-        
-        print("Dekodirano uspešno!")
-        print(f"  rooms:   {int(house['rooms'])}")
-        print(f"  windows: {int(house['windows'])}")
-        print(f"  doors:   {int(house['doors'])}")
-        print(f"  sockets: {int(house['sockets'])}")
-        
-        # Preverimo constraint-e ročno (pyasn1 jih ne vedno uveljavlja)
-        errors = []
-        if not (1 <= int(house['rooms']) <= 4):
-            errors.append(f"rooms={int(house['rooms'])} ni v [1..4]")
-        if not (5 <= int(house['windows']) <= 8):
-            errors.append(f"windows={int(house['windows'])} ni v [5..8]")
-        if not (7 <= int(house['doors']) <= 11):
-            errors.append(f"doors={int(house['doors'])} ni v [7..11]")
-        if not (9 <= int(house['sockets']) <= 13):
-            errors.append(f"sockets={int(house['sockets'])} ni v [9..13]")
-        
-        if errors:
-            print(f"\nNAPAKE V VREDNOSTIH:")
-            for e in errors:
-                print(f"  ✗ {e}")
-            return house, False
-        else:
-            print("  ✓ Vse vrednosti so v veljavnem obsegu!")
-            return house, True
-            
-    except PyAsn1Error as e:
-        print(f"Napaka pri dekodiranju: {e}")
-        return None, False
+        fields = parse_der(data)
+    except ValueError as e:
+        print(f"\n  [!] Napaka pri razčlenjevanju: {e}")
+        return
 
-# -------------------------------------------------------
-# Ustvari pravilno kodiran House DER (za referenco)
-# -------------------------------------------------------
-def create_correct_house(rooms=2, windows=6, doors=9, sockets=11):
-    """
-    Ustvari pravilno kodiran House ASN.1 DER objekt.
-    Vrednosti morajo biti v veljavnih obsegih!
-    """
-    house = House()
-    house['rooms']   = rooms    # 1..4
-    house['windows'] = windows  # 5..8
-    house['doors']   = doors    # 7..11
-    house['sockets'] = sockets  # 9..13
-    
-    encoded = der_encode(house)
-    print(f"\nPravilen DER (rooms={rooms}, windows={windows}, "
-          f"doors={doors}, sockets={sockets}):")
-    print(f"  Hex: {encoded.hex()}")
-    print(f"  Bajti: {list(encoded)}")
-    return encoded
+    # Prikaži vrednosti
+    print("\n  Dekodirane vrednosti:")
+    print_fields(fields)
 
-def create_test_der_with_errors():
-    """Ustvari DER bajte z namerno napačno vrednostjo za demonstracijo."""
-    # Ročno zgradimo napačen DER:
-    # rooms=2 (OK), windows=3 (NAPAKA! mora biti 5-8), doors=9 (OK), sockets=11 (OK)
-    return bytes([
-        0x30, 0x0c,        # SEQUENCE, dolžina 12
-        0x02, 0x01, 0x02,  # INTEGER rooms = 2 ✓
-        0x02, 0x01, 0x03,  # INTEGER windows = 3 ✗ (mora biti 5-8!)
-        0x02, 0x01, 0x09,  # INTEGER doors = 9 ✓
-        0x02, 0x01, 0x0b,  # INTEGER sockets = 11 ✓
-    ])
+    # Validiraj
+    errors = validate(fields)
+    if not errors:
+        print("\n  ✅ Vse vrednosti so veljavne. Ni potrebnih popravkov.")
+        return
+
+    print(f"\n  ❌ Najdene napake ({len(errors)}):")
+    for err in errors:
+        print(err)
+
+    # Popravi
+    fixed_fields = fix(fields)
+    fixed_bytes = encode_sequence(fixed_fields)
+    fixed_hex = fixed_bytes.hex()
+
+    print("\n  Popravljene vrednosti:")
+    print_fields(fixed_fields, "popravljeno")
+
+    print(f"\n  HEX izhod: {fixed_hex}")
+    print(f"  Bajti    : {' '.join(f'{b:02x}' for b in fixed_bytes)}")
+
+    # Shrani popravljeno datoteko
+    out_path = path.replace(".txt", "_fixed.txt")
+    with open(out_path, "w") as f:
+        f.write(fixed_hex)
+    print(f"\n  💾 Shranjeno: {out_path}")
+
+
+# ─── Glavna logika ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Prikažemo pravilno kodiranje za referenco
-    print("=== Referenčni pravilni DER objekt ===")
-    correct_der = create_correct_house(rooms=2, windows=6, doors=9, sockets=11)
-    
-    # Preverimo house1.txt in house2.txt (DER je binaren, ne txt!)
-    # V resnici bi bili to .der datoteke
-    for fname in ["house1.der", "house2.der"]:
-        verify_and_fix_house(fname)
-    
-    # Demonstracija ročne analize napačnega objekta
-    print("\n\n=== Demonstracija analize napačnega DER ===")
-    bad_der = create_test_der_with_errors()
-    analyze_der_bytes(bad_der, "napačen primer")
+    import sys
+
+    files = sys.argv[1:] if len(sys.argv) > 1 else ["house1.txt", "house2.txt"]
+
+    print("╔═══════════════════════════════════════════════════════╗")
+    print("║      ASN.1 House DER Validator & Popravljalnik        ║")
+    print("╚═══════════════════════════════════════════════════════╝")
+
+    for path in files:
+        try:
+            process_file(path)
+        except FileNotFoundError:
+            print(f"\n  [!] Datoteka ne obstaja: {path}")
+        except Exception as e:
+            print(f"\n  [!] Neznana napaka: {e}")
+
+    print(f"\n{'='*55}\n Končano.\n{'='*55}\n")

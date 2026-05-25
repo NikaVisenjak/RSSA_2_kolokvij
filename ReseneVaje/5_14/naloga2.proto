@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+// Prazen objekt (za rpc-je, ki ne potrebujejo podatkov)
+message Empty {}
+
+// Eno število (float)
+message Stevilo {
+    float vrednost = 1;
+}
+
+// Indeks za GetOne
+message Indeks {
+    int32 i = 1;
+}
+
+service Naloga2 {
+    // 1. Pošlji eno število → strežnik shrani, vrne Empty
+    rpc SendOne (Stevilo) returns (Empty);
+
+    // 2. Pošlji indeks → strežnik vrne število na tistem mestu v seznamu
+    rpc GetOne (Indeks) returns (Stevilo);
+
+    // 3. Pošlji stream števil → strežnik shrani vsa, vrne Empty
+    rpc SendMore (stream Stevilo) returns (Empty);
+
+    // 4. Pošlji Empty → strežnik vrne stream vseh shranjenih števil
+    rpc GetAll (Empty) returns (stream Stevilo);
+}
+
+//zazeni python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. naloga2.proto

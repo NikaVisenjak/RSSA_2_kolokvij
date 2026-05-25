@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package chat;
+
+// prazno sporočilo
+message Empty {}
+
+// chat sporočilo
+message Note {
+  string name = 1;
+  string message = 2;
+}
+
+// service za chatroom
+service ChatServer {
+
+  // client → server (en message, nič nazaj)
+  rpc SendNote(Note) returns (Empty);
+
+  // server → client streaming
+  rpc ChatStream(Empty) returns (stream Note);
+}
