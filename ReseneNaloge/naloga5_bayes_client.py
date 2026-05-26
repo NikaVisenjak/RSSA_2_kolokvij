@@ -17,116 +17,313 @@
 #   Diagonale = kombinacija obeh
 # ============================================================
 
+# ============================================================
+# NALOGA 5: gRPC CLIENT - Bayesovo iskanje z bisekcijo
+# ============================================================
+
+# Uvoz gRPC knjižnice
 import grpc
+
+# Uvoz protobuf datotek
 import bayes_game_pb2
 import bayes_game_pb2_grpc
 
+
+# ============================================================
+# FUNKCIJA play_with_bisection
+# Igra z uporabo bisekcijske strategije
+# ============================================================
 def play_with_bisection(stub):
-    """
-    Igra z bisekcijsko strategijo - minimizira število poskusov.
-    """
-    # --- Začni igro ---
-    start_resp = stub.StartGame(bayes_game_pb2.StartGameRequest())
+
+    # --------------------------------------------------------
+    # ZAČETEK IGRE
+    # --------------------------------------------------------
+
+    # Pokličemo RPC metodo StartGame
+    start_resp = stub.StartGame(
+        bayes_game_pb2.StartGameRequest()
+    )
+
+    # Shranimo ID igre
     game_id = start_resp.game_id
+
+    # Izpis začetka igre
     print(f"Igra {game_id} začeta!")
-    
-    # --- Inicializacija iskalnega prostora ---
-    # Ker ne vemo dimenzij mize, začnemo z velikim prostorom
-    # Ko dobimo prve napotke, se bo prostor zoužal
-    x_min, x_max = 0.0, 2000.0   # začetni x razpon (konzervativna ocena)
-    y_min, y_max = 0.0, 2000.0   # začetni y razpon
-    
+
+    # --------------------------------------------------------
+    # ZAČETNI ISKALNI PROSTOR
+    # --------------------------------------------------------
+
+    # Začetna spodnja meja x
+    x_min = 0.0
+
+    # Začetna zgornja meja x
+    x_max = 2000.0
+
+    # Začetna spodnja meja y
+    y_min = 0.0
+
+    # Začetna zgornja meja y
+    y_max = 2000.0
+
+    # Števec poskusov
     attempts = 0
-    MAX_ATTEMPTS = 100  # varnostna meja
-    
+
+    # Maksimalno število dovoljenih poskusov
+    MAX_ATTEMPTS = 100
+
+    # --------------------------------------------------------
+    # GLAVNA ZANKA IGRE
+    # --------------------------------------------------------
     while attempts < MAX_ATTEMPTS:
-        # Naslednje ugibanje = SREDINA trenutnega iskalnega prostora
-        # To je optimalna strategija - vsaka ugibanje razpolovi prostor
+
+        # Sredina trenutnega prostora po x osi
         guess_x = (x_min + x_max) / 2.0
+
+        # Sredina trenutnega prostora po y osi
         guess_y = (y_min + y_max) / 2.0
-        
-        print(f"\nFaza {attempts+1}: Ugibam ({guess_x:.1f}, {guess_y:.1f}) | "
-              f"Prostor: x=[{x_min:.0f},{x_max:.0f}], y=[{y_min:.0f},{y_max:.0f}]")
-        
-        # Pošljemo ugibanje serverju
-        resp = stub.MakeGuess(bayes_game_pb2.GuessRequest(
-            game_id = game_id,
-            x       = guess_x,
-            y       = guess_y,
-        ))
-        
+
+        # Izpis trenutnega ugibanja
+        print(
+            f"\nFaza {attempts+1}: "
+            f"Ugibam ({guess_x:.1f}, {guess_y:.1f}) | "
+            f"Prostor: "
+            f"x=[{x_min:.0f},{x_max:.0f}], "
+            f"y=[{y_min:.0f},{y_max:.0f}]"
+        )
+
+        # ----------------------------------------------------
+        # POŠLJEMO UGIBANJE SERVERJU
+        # ----------------------------------------------------
+
+        # Kličemo RPC metodo MakeGuess
+        resp = stub.MakeGuess(
+
+            # Ustvarimo protobuf zahtevek
+            bayes_game_pb2.GuessRequest(
+
+                # ID trenutne igre
+                game_id=game_id,
+
+                # Ugibanje po x osi
+                x=guess_x,
+
+                # Ugibanje po y osi
+                y=guess_y,
+            )
+        )
+
+        # Povečamo števec poskusov
         attempts += 1
-        
+
+        # ----------------------------------------------------
+        # PREVERIMO ALI SMO ZADELI
+        # ----------------------------------------------------
+
+        # Če je igre konec
         if resp.game_over:
-            # HIT! Zadeli smo!
-            print(f"\n✓ ZADELI! Potrebovali smo {resp.attempts} poskusov!")
+
+            # Izpis uspeha
+            print(
+                f"\n✓ ZADELI! "
+                f"Potrebovali smo "
+                f"{resp.attempts} poskusov!"
+            )
+
+            # Vrni število poskusov
             return attempts
-        
-        # --- Posodobimo iskalni prostor glede na smer ---
-        # direction nam pove kje je žoga RELATIVNO NA naše ugibanje
+
+        # ----------------------------------------------------
+        # PREBEREMO SMER OD SERVERJA
+        # ----------------------------------------------------
+
+        # Smer žoge glede na naše ugibanje
         d = resp.direction
-        
+
+        # ----------------------------------------------------
+        # POSODOBIMO ISKALNI PROSTOR
+        # ----------------------------------------------------
+
+        # Če je žoga severno
         if d == bayes_game_pb2.NORTH:
-            # Žoga je NAD nami -> dvignemo spodnjo mejo y
+
+            # Dvignemo spodnjo y mejo
             y_min = guess_y
-            print(f"  ↑ SEVER: dvigam y_min na {y_min:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ↑ SEVER: "
+                f"dvigam y_min na {y_min:.0f}"
+            )
+
+        # Če je žoga južno
         elif d == bayes_game_pb2.SOUTH:
-            # Žoga je POD nami -> znižamo zgornjo mejo y
+
+            # Spustimo zgornjo y mejo
             y_max = guess_y
-            print(f"  ↓ JUG: znižam y_max na {y_max:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ↓ JUG: "
+                f"znižam y_max na {y_max:.0f}"
+            )
+
+        # Če je žoga vzhodno
         elif d == bayes_game_pb2.EAST:
-            # Žoga je DESNO -> povečamo spodnjo mejo x
+
+            # Dvignemo spodnjo x mejo
             x_min = guess_x
-            print(f"  → VZHOD: dvigam x_min na {x_min:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  → VZHOD: "
+                f"dvigam x_min na {x_min:.0f}"
+            )
+
+        # Če je žoga zahodno
         elif d == bayes_game_pb2.WEST:
-            # Žoga je LEVO -> znižamo zgornjo mejo x
+
+            # Spustimo zgornjo x mejo
             x_max = guess_x
-            print(f"  ← ZAHOD: znižam x_max na {x_max:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ← ZAHOD: "
+                f"znižam x_max na {x_max:.0f}"
+            )
+
+        # Če je žoga severovzhodno
         elif d == bayes_game_pb2.NORTHEAST:
-            # Žoga je DESNO IN ZGORAJ -> oba popravka
+
+            # Dvignemo spodnjo x mejo
             x_min = guess_x
+
+            # Dvignemo spodnjo y mejo
             y_min = guess_y
-            print(f"  ↗ SEVERO-VZHOD: x_min={x_min:.0f}, y_min={y_min:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ↗ SEVERO-VZHOD: "
+                f"x_min={x_min:.0f}, "
+                f"y_min={y_min:.0f}"
+            )
+
+        # Če je žoga jugovzhodno
         elif d == bayes_game_pb2.SOUTHEAST:
+
+            # Dvignemo spodnjo x mejo
             x_min = guess_x
+
+            # Spustimo zgornjo y mejo
             y_max = guess_y
-            print(f"  ↘ JUGO-VZHOD: x_min={x_min:.0f}, y_max={y_max:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ↘ JUGO-VZHOD: "
+                f"x_min={x_min:.0f}, "
+                f"y_max={y_max:.0f}"
+            )
+
+        # Če je žoga jugozahodno
         elif d == bayes_game_pb2.SOUTHWEST:
+
+            # Spustimo zgornjo x mejo
             x_max = guess_x
+
+            # Spustimo zgornjo y mejo
             y_max = guess_y
-            print(f"  ↙ JUGO-ZAHOD: x_max={x_max:.0f}, y_max={y_max:.0f}")
-            
+
+            # Izpis spremembe
+            print(
+                f"  ↙ JUGO-ZAHOD: "
+                f"x_max={x_max:.0f}, "
+                f"y_max={y_max:.0f}"
+            )
+
+        # Če je žoga severozahodno
         elif d == bayes_game_pb2.NORTHWEST:
+
+            # Spustimo zgornjo x mejo
             x_max = guess_x
+
+            # Dvignemo spodnjo y mejo
             y_min = guess_y
-            print(f"  ↖ SEVERO-ZAHOD: x_max={x_max:.0f}, y_min={y_min:.0f}")
-        
-        # Varnostno preverjanje: če se prostor ne zoužuje, je problem
-        width  = x_max - x_min
+
+            # Izpis spremembe
+            print(
+                f"  ↖ SEVERO-ZAHOD: "
+                f"x_max={x_max:.0f}, "
+                f"y_min={y_min:.0f}"
+            )
+
+        # ----------------------------------------------------
+        # IZRAČUN PREOSTALEGA PROSTORA
+        # ----------------------------------------------------
+
+        # Širina preostalega prostora
+        width = x_max - x_min
+
+        # Višina preostalega prostora
         height = y_max - y_min
-        print(f"  Preostali prostor: {width:.0f} x {height:.0f} enot")
-    
-    print(f"Presegli smo max poskusov ({MAX_ATTEMPTS})")
+
+        # Izpis velikosti prostora
+        print(
+            f"  Preostali prostor: "
+            f"{width:.0f} x {height:.0f} enot"
+        )
+
+    # --------------------------------------------------------
+    # Če presežemo maksimalno število poskusov
+    # --------------------------------------------------------
+
+    print(
+        f"Presegli smo "
+        f"max poskusov ({MAX_ATTEMPTS})"
+    )
+
+    # Vrni število poskusov
     return attempts
 
+
+# ============================================================
+# FUNKCIJA main
+# ============================================================
 def main():
-    # Povežemo se na Bayes server (port 50052)
-    channel = grpc.insecure_channel("localhost:50052")
-    stub    = bayes_game_pb2_grpc.BayesGameStub(channel)
-    
+
+    # Ustvarimo povezavo na gRPC server
+    channel = grpc.insecure_channel(
+        "localhost:50052"
+    )
+
+    # Ustvarimo stub objekt
+    stub = bayes_game_pb2_grpc.BayesGameStub(channel)
+
+    # Izpis naslova
     print("=== Bayesova igra iskanja žoge ===")
-    print("Strategija: iterativna bisekcija iskalnega prostora\n")
-    
+
+    # Izpis strategije
+    print(
+        "Strategija: "
+        "iterativna bisekcija iskalnega prostora\n"
+    )
+
+    # Zaženemo igro
     total_attempts = play_with_bisection(stub)
-    print(f"\nUčinkovitost: zadeli v {total_attempts} korakih")
-    
+
+    # Končni izpis uspešnosti
+    print(
+        f"\nUčinkovitost: "
+        f"zadeli v {total_attempts} korakih"
+    )
+
+    # Zapremo povezavo
     channel.close()
 
+
+# ============================================================
+# MAIN
+# ============================================================
 if __name__ == "__main__":
+
+    # Zaženemo klienta
     main()
