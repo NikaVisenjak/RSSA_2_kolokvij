@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package secure_service;
+
+// SecureService - storitev z vzajemno avtentikacijo (mTLS)
+// Identiteta klienta je zaščitena s šifriranjem na transportni plasti
+service SecureService {
+
+  // Pošlje šifrirano sporočilo strežniku
+  rpc SendMessage (MessageRequest) returns (MessageResponse);
+
+  // Pridobi informacije o strežniku (preveri identiteto strežnika)
+  rpc GetServerInfo (ServerInfoRequest) returns (ServerInfoResponse);
+
+  // Ping - test vzpostavljene varne seje
+  rpc Ping (PingRequest) returns (PingResponse);
+}
+
+// Zahteva za pošiljanje sporočila
+message MessageRequest {
+  string content = 1;       // Vsebina sporočila (šifrirana na transportni plasti)
+  string timestamp = 2;     // Časovni žig
+  string message_id = 3;    // Unikatni ID sporočila
+}
+
+// Odgovor na sporočilo
+message MessageResponse {
+  bool success = 1;
+  string message = 2;
+  string server_timestamp = 3;
+  string session_id = 4;   // ID trenutne seje
+}
+
+// Zahteva za info strežnika
+message ServerInfoRequest {
+  string request_id = 1;
+}
+
+// Informacije o strežniku (dokazuje identiteto strežnika)
+message ServerInfoResponse {
+  string server_name = 1;
+  string version = 2;
+  string certificate_fingerprint = 3;  // Fingerprint strežnikovega certifikata
+  string supported_cipher = 4;
+}
+
+// Ping zahteva
+message PingRequest {
+  string client_nonce = 1;  // Naključna vrednost za preprečitev replay napadov
+}
+
+// Ping odgovor
+message PingResponse {
+  string server_nonce = 1;  // Strežnikov nonce
+  string client_nonce = 2;  // Echo klientovega nonce
+  string timestamp = 3;
+}
